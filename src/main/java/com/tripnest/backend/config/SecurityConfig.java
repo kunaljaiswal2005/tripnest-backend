@@ -1,5 +1,4 @@
 package com.tripnest.backend.config;
-
 import com.tripnest.backend.security.JwtAuthFilter;
 import com.tripnest.backend.security.OAuth2SuccessHandler;
 import com.tripnest.backend.security.UserDetailsServiceImpl;

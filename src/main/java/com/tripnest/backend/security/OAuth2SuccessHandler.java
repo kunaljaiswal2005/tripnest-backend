@@ -9,11 +9,11 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -32,12 +32,27 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
                                         Authentication authentication)
             throws IOException {
 
-        OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
+        // Spring Boot 4.x compatible way
+        Object principal = authentication.getPrincipal();
 
-        String email = oAuth2User.getAttribute("email");
-        String name  = oAuth2User.getAttribute("name");
+        Map<String, Object> attributes;
 
-        // User pehle se hai ya naya banao
+        if (principal instanceof org.springframework.security.oauth2.core.user.DefaultOAuth2User oAuth2User) {
+            attributes = oAuth2User.getAttributes();
+        } else {
+            response.sendRedirect(frontendUrl + "/login?error=true");
+            return;
+        }
+
+        String email = (String) attributes.get("email");
+        String name  = (String) attributes.get("name");
+
+        if (email == null) {
+            response.sendRedirect(frontendUrl + "/login?error=true");
+            return;
+        }
+
+        // User already hai ya naya banao
         User user = userRepository.findByEmail(email)
                 .orElseGet(() -> {
                     Role role = roleRepository
@@ -47,7 +62,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
                     User newUser = User.builder()
                             .name(name)
                             .email(email)
-                            .password("OAUTH2_USER") // password nahi hota OAuth users ka
+                            .password("OAUTH2_USER")
                             .role(role)
                             .isActive(true)
                             .build();
@@ -58,8 +73,9 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         // JWT token banao
         String token = jwtUtil.generateToken(user.getEmail());
 
-        // Frontend pe redirect karo token ke saath
-        String redirectUrl = frontendUrl + "/oauth2/success?token=" + token
+        // Frontend pe redirect
+        String redirectUrl = frontendUrl
+                + "/oauth2/success?token=" + token
                 + "&email=" + email
                 + "&role=" + user.getRole().getRoleName().name();
 
