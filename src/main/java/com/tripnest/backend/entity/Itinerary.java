@@ -2,6 +2,7 @@ package com.tripnest.backend.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.time.LocalDate;
 
 @Entity
@@ -16,15 +17,21 @@ public class Itinerary {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // YE FIX KIYA
+    @Column(name = "itinerary_date", nullable = false)
+    private LocalDate date;
+
     @Column(name = "day_number", nullable = false)
     private Integer dayNumber;
-
-    @Column(nullable = false)
-    private LocalDate date;
 
     private String notes;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "trip_id")
     private Trip trip;
+
+    @OneToMany(mappedBy = "itinerary",
+               cascade = CascadeType.ALL,
+               fetch = FetchType.LAZY)
+    private java.util.List<Activity> activities;
 }
