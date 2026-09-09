@@ -3,6 +3,7 @@ package com.tripnest.backend.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -37,6 +38,10 @@ public class Trip {
     private TripStatus status;
 
     private String description;
+
+    // YE FIELD ADD HUA
+    @Column(name = "cover_image")
+    private String coverImage;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
