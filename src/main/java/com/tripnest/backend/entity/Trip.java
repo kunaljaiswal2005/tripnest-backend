@@ -33,6 +33,9 @@ public class Trip {
     @Column(name = "total_budget")
     private Double totalBudget;
 
+    @Column(name = "travelers")
+    private Integer travelers;
+
     @Enumerated(EnumType.STRING)
     private TripStatus status;
 
@@ -45,6 +48,10 @@ public class Trip {
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
+
+    public boolean isDateRangeValid() {
+        return !endDate.isBefore(startDate);
+    }
 
     public enum TripStatus {
         PLANNING, UPCOMING, ONGOING, COMPLETED, CANCELLED
