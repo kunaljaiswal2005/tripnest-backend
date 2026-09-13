@@ -1,6 +1,8 @@
 package com.tripnest.backend.entity;
+
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.time.LocalTime;
 
 @Entity
@@ -25,8 +27,10 @@ public class Activity {
     @Column(name = "start_time")
     private LocalTime startTime;
 
-    private String location;
+    @Column(name = "end_time")
+    private LocalTime endTime;
 
+    private String location;
     private String notes;
 
     @Column(name = "estimated_cost")
