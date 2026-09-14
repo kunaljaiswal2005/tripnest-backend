@@ -1,4 +1,5 @@
 package com.tripnest.backend.entity;
+
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -29,6 +30,7 @@ public class Destination {
     @Column(name = "best_time_to_visit")
     private String bestTimeToVisit;
 
+    @Builder.Default
     @Column(name = "is_popular")
     private Boolean isPopular = false;
 }
