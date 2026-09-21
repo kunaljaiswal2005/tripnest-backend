@@ -24,6 +24,7 @@ public class Notification {
     private NotificationType notificationType;
 
     @Column(name = "is_read")
+    @Builder.Default
     private Boolean isRead = false;
 
     @ManyToOne(fetch = FetchType.LAZY)

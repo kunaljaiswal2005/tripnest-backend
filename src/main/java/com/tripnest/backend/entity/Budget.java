@@ -33,6 +33,9 @@ public class Budget {
     @Column(name = "shopping_budget")
     private Double shoppingBudget;
 
+    @Column(name = "entertainment_budget")
+    private Double entertainmentBudget;
+
     @Column(name = "misc_budget")
     private Double miscBudget;
 

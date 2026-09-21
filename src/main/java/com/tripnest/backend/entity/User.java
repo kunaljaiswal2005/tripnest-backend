@@ -30,7 +30,8 @@ public class User {
     private Role role;
 
     @Column(name = "is_active")
-    private Boolean isActive = true;
+    @Builder.Default
+    private Boolean isActive = true;   
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
