@@ -3,6 +3,7 @@ package com.tripnest.backend.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -29,6 +30,10 @@ public class Expense {
 
     @Column(name = "expense_date")
     private LocalDate expenseDate;
+
+    // ✅ YE FIELD ADD HUA
+    @Column(name = "receipt_url")
+    private String receiptUrl;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "trip_id")
