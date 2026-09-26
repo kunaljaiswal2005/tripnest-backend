@@ -2,6 +2,7 @@ package com.tripnest.backend.service;
 
 import com.tripnest.backend.dto.TripRequest;
 import com.tripnest.backend.dto.TripResponse;
+import com.tripnest.backend.entity.Notification;
 import com.tripnest.backend.entity.Trip;
 import com.tripnest.backend.entity.User;
 import com.tripnest.backend.repository.TripRepository;
@@ -19,8 +20,8 @@ public class TripService {
 
     private final TripRepository tripRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
-    // Current logged in user nikalo
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext()
                 .getAuthentication().getName();
@@ -28,7 +29,6 @@ public class TripService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
 
-    // Trip banao
     public TripResponse createTrip(TripRequest request) {
         User user = getCurrentUser();
 
@@ -45,10 +45,19 @@ public class TripService {
                 .user(user)
                 .build();
 
-        return TripResponse.fromEntity(tripRepository.save(trip));
+        Trip saved = tripRepository.save(trip);
+
+        // ✅ Auto notification
+        notificationService.createNotification(
+                user,
+                "New trip created: " + saved.getTitle()
+                        + " → " + saved.getDestination(),
+                Notification.NotificationType.TRIP_REMINDER
+        );
+
+        return TripResponse.fromEntity(saved);
     }
 
-    // Apni saari trips dekho
     public List<TripResponse> getMyTrips() {
         User user = getCurrentUser();
         return tripRepository.findByUserId(user.getId())
@@ -57,25 +66,19 @@ public class TripService {
                 .collect(Collectors.toList());
     }
 
-    // Ek trip ki detail
     public TripResponse getTripById(Long id) {
         Trip trip = tripRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Trip not found"));
-
-        // Sirf apni trip dekh sako
         User user = getCurrentUser();
         if (!trip.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Access denied");
         }
-
         return TripResponse.fromEntity(trip);
     }
 
-    // Trip update karo
     public TripResponse updateTrip(Long id, TripRequest request) {
         Trip trip = tripRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Trip not found"));
-
         User user = getCurrentUser();
         if (!trip.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Access denied");
@@ -95,30 +98,35 @@ public class TripService {
         return TripResponse.fromEntity(tripRepository.save(trip));
     }
 
-    // Trip delete karo
     public void deleteTrip(Long id) {
         Trip trip = tripRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Trip not found"));
-
         User user = getCurrentUser();
         if (!trip.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Access denied");
         }
-
         tripRepository.delete(trip);
     }
 
-    // Status update karo
-    public TripResponse updateTripStatus(Long id, Trip.TripStatus status) {
+    public TripResponse updateTripStatus(Long id,
+                                          Trip.TripStatus status) {
         Trip trip = tripRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Trip not found"));
-
         User user = getCurrentUser();
         if (!trip.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Access denied");
         }
 
         trip.setStatus(status);
+
+        // ✅ Status change notification
+        notificationService.createNotification(
+                user,
+                "Trip status updated: " + trip.getTitle()
+                        + " is now " + status.name(),
+                Notification.NotificationType.TRAVEL_UPDATE
+        );
+
         return TripResponse.fromEntity(tripRepository.save(trip));
     }
 }

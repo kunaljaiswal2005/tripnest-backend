@@ -1,7 +1,9 @@
 package com.tripnest.backend.entity;
+
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+
 import java.time.LocalDateTime;
 
 @Entity
@@ -20,15 +22,15 @@ public class Notification {
     private String message;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "notification_type")
+    @Column(name = "notification_type", nullable = false)
     private NotificationType notificationType;
 
-    @Column(name = "is_read")
     @Builder.Default
+    @Column(name = "is_read", nullable = false)
     private Boolean isRead = false;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id")
+    @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
     @CreationTimestamp
@@ -36,7 +38,11 @@ public class Notification {
     private LocalDateTime createdAt;
 
     public enum NotificationType {
-        TRIP_REMINDER, ACTIVITY_REMINDER, BUDGET_ALERT,
-        GROUP_INVITATION, TRAVEL_UPDATE, SYSTEM
+        TRIP_REMINDER,
+        ACTIVITY_REMINDER,
+        BUDGET_ALERT,
+        GROUP_INVITATION,
+        TRAVEL_UPDATE,
+        SYSTEM
     }
 }
