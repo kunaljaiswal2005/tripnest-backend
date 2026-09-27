@@ -6,6 +6,8 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "expenses")
@@ -31,9 +33,24 @@ public class Expense {
     @Column(name = "expense_date")
     private LocalDate expenseDate;
 
-    // ✅ YE FIELD ADD HUA
     @Column(name = "receipt_url")
     private String receiptUrl;
+
+    // ✅ New fields
+    @Builder.Default
+    @Column(name = "is_shared")
+    private Boolean isShared = false;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "split_type")
+    private SplitType splitType;
+
+    @Builder.Default
+    @OneToMany(mappedBy = "expense",
+               cascade = CascadeType.ALL,
+               fetch = FetchType.LAZY,
+               orphanRemoval = true)
+    private List<ExpenseSplit> splits = new ArrayList<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "trip_id")
@@ -50,5 +67,9 @@ public class Expense {
     public enum ExpenseCategory {
         TRANSPORTATION, HOTEL, FOOD,
         SHOPPING, ENTERTAINMENT, MISCELLANEOUS
+    }
+
+    public enum SplitType {
+        EQUAL, CUSTOM
     }
 }

@@ -3,8 +3,10 @@ package com.tripnest.backend.controllers;
 import com.tripnest.backend.dto.ExpenseRequest;
 import com.tripnest.backend.dto.ExpenseResponse;
 import com.tripnest.backend.dto.ExpenseSummaryResponse;
+import com.tripnest.backend.dto.SettlementResponse;
 import com.tripnest.backend.entity.Expense;
 import com.tripnest.backend.service.ExpenseService;
+import com.tripnest.backend.service.SettlementService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,8 +20,9 @@ import java.util.List;
 public class ExpenseController {
 
     private final ExpenseService expenseService;
+    private final SettlementService settlementService;
 
-    // POST /api/trips/{tripId}/expenses — Expense add karo
+    // POST /api/trips/{tripId}/expenses
     @PostMapping("/trips/{tripId}/expenses")
     public ResponseEntity<ExpenseResponse> addExpense(
             @PathVariable Long tripId,
@@ -28,7 +31,7 @@ public class ExpenseController {
                 expenseService.addExpense(tripId, request));
     }
 
-    // GET /api/trips/{tripId}/expenses — Saari expenses
+    // GET /api/trips/{tripId}/expenses
     @GetMapping("/trips/{tripId}/expenses")
     public ResponseEntity<List<ExpenseResponse>> getExpenses(
             @PathVariable Long tripId) {
@@ -36,7 +39,7 @@ public class ExpenseController {
                 expenseService.getExpensesByTrip(tripId));
     }
 
-    // GET /api/trips/{tripId}/expenses/summary — Summary
+    // GET /api/trips/{tripId}/expenses/summary
     @GetMapping("/trips/{tripId}/expenses/summary")
     public ResponseEntity<ExpenseSummaryResponse> getSummary(
             @PathVariable Long tripId) {
@@ -50,10 +53,19 @@ public class ExpenseController {
             @PathVariable Long tripId,
             @RequestParam Expense.ExpenseCategory cat) {
         return ResponseEntity.ok(
-                expenseService.getExpensesByCategory(tripId, cat));
+                expenseService.getExpensesByCategory(
+                        tripId, cat));
     }
 
-    // PUT /api/expenses/{id} — Update karo
+    // GET /api/trips/{tripId}/settlement
+    @GetMapping("/trips/{tripId}/settlement")
+    public ResponseEntity<SettlementResponse> getSettlement(
+            @PathVariable Long tripId) {
+        return ResponseEntity.ok(
+                settlementService.calculateSettlement(tripId));
+    }
+
+    // PUT /api/expenses/{id}
     @PutMapping("/expenses/{id}")
     public ResponseEntity<ExpenseResponse> updateExpense(
             @PathVariable Long id,
@@ -62,7 +74,7 @@ public class ExpenseController {
                 expenseService.updateExpense(id, request));
     }
 
-    // DELETE /api/expenses/{id} — Delete karo
+    // DELETE /api/expenses/{id}
     @DeleteMapping("/expenses/{id}")
     public ResponseEntity<String> deleteExpense(
             @PathVariable Long id) {

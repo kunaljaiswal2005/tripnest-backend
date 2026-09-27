@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 public class ExpenseRequest {
@@ -23,4 +24,9 @@ public class ExpenseRequest {
     private LocalDate expenseDate;
 
     private String receiptUrl;
+
+    // ✅ Shared expense fields
+    private Boolean isShared = false;
+    private Expense.SplitType splitType;
+    private List<SplitMemberRequest> members;
 }
