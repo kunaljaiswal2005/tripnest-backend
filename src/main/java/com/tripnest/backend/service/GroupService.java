@@ -28,6 +28,7 @@ public class GroupService {
     private final UserRepository userRepository;
     private final TripRepository tripRepository;
     private final NotificationService notificationService;
+    private final EmailService emailService;
 
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext()
@@ -49,13 +50,13 @@ public class GroupService {
             Trip trip = tripRepository
                     .findById(request.getTripId())
                     .orElseThrow(() ->
-                            new RuntimeException("Trip not found"));
+                            new RuntimeException(
+                                    "Trip not found"));
             builder.trip(trip);
         }
 
         Group group = groupRepository.save(builder.build());
 
-        // Creator ko ADMIN banao
         GroupMember adminMember = GroupMember.builder()
                 .group(group)
                 .user(user)
@@ -65,16 +66,14 @@ public class GroupService {
 
         groupMemberRepository.save(adminMember);
 
-        // ✅ Notification
         notificationService.createNotification(
                 user,
                 "Group created: \"" + group.getName() + "\"",
-                Notification.NotificationType.SYSTEM
-        );
+                Notification.NotificationType.SYSTEM);
 
-        Group saved = groupRepository.findById(group.getId())
-                .orElseThrow();
-        return GroupResponse.fromEntity(saved);
+        return GroupResponse.fromEntity(
+                groupRepository.findById(group.getId())
+                        .orElseThrow());
     }
 
     public List<GroupResponse> getMyGroups() {
@@ -120,7 +119,8 @@ public class GroupService {
                         new RuntimeException("Group not found"));
 
         GroupMember currentMember = groupMemberRepository
-                .findByGroupIdAndUserId(groupId, currentUser.getId())
+                .findByGroupIdAndUserId(
+                        groupId, currentUser.getId())
                 .orElseThrow(() ->
                         new RuntimeException("Access denied"));
 
@@ -149,13 +149,21 @@ public class GroupService {
 
         GroupMember saved = groupMemberRepository.save(member);
 
-        // ✅ Invited user ko notification
+        // In-app notification
         notificationService.createNotification(
                 invitedUser,
                 "You have been invited to join group: \""
                         + group.getName() + "\" by "
                         + currentUser.getName(),
                 Notification.NotificationType.GROUP_INVITATION
+        );
+
+        // Email
+        emailService.sendGroupInvitationEmail(
+                invitedUser.getEmail(),
+                invitedUser.getName(),
+                group.getName(),
+                currentUser.getName()
         );
 
         return GroupMemberResponse.fromEntity(saved);
@@ -167,12 +175,32 @@ public class GroupService {
         GroupMember member = groupMemberRepository
                 .findByGroupIdAndUserId(groupId, user.getId())
                 .orElseThrow(() ->
-                        new RuntimeException("Invitation not found"));
+                        new RuntimeException(
+                                "Invitation not found"));
 
         member.setStatus(GroupMember.InviteStatus.ACCEPTED);
         GroupMember saved = groupMemberRepository.save(member);
 
-        // ✅ Notification
+        // Notify group owner
+        User groupOwner = member.getGroup().getCreatedBy();
+
+        notificationService.createNotification(
+                groupOwner,
+                user.getName() + " accepted your invitation "
+                        + "to join \""
+                        + member.getGroup().getName() + "\"",
+                Notification.NotificationType.GROUP_INVITATION
+        );
+
+        // Email to owner
+        emailService.sendInvitationAcceptedEmail(
+                groupOwner.getEmail(),
+                groupOwner.getName(),
+                user.getName(),
+                member.getGroup().getName()
+        );
+
+        // Notification to self
         notificationService.createNotification(
                 user,
                 "You joined group: \""
@@ -189,9 +217,20 @@ public class GroupService {
         GroupMember member = groupMemberRepository
                 .findByGroupIdAndUserId(groupId, user.getId())
                 .orElseThrow(() ->
-                        new RuntimeException("Invitation not found"));
+                        new RuntimeException(
+                                "Invitation not found"));
 
         member.setStatus(GroupMember.InviteStatus.DECLINED);
+
+        // Notify group owner
+        notificationService.createNotification(
+                member.getGroup().getCreatedBy(),
+                user.getName() + " declined your invitation "
+                        + "to join \""
+                        + member.getGroup().getName() + "\"",
+                Notification.NotificationType.GROUP_INVITATION
+        );
+
         return GroupMemberResponse.fromEntity(
                 groupMemberRepository.save(member));
     }
@@ -200,7 +239,8 @@ public class GroupService {
         User currentUser = getCurrentUser();
 
         GroupMember currentMember = groupMemberRepository
-                .findByGroupIdAndUserId(groupId, currentUser.getId())
+                .findByGroupIdAndUserId(
+                        groupId, currentUser.getId())
                 .orElseThrow(() ->
                         new RuntimeException("Access denied"));
 
@@ -214,6 +254,14 @@ public class GroupService {
                 .findById(memberId)
                 .orElseThrow(() ->
                         new RuntimeException("Member not found"));
+
+        // Notify removed member
+        notificationService.createNotification(
+                toRemove.getUser(),
+                "You have been removed from group: \""
+                        + toRemove.getGroup().getName() + "\"",
+                Notification.NotificationType.SYSTEM
+        );
 
         groupMemberRepository.delete(toRemove);
     }

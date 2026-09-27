@@ -7,18 +7,21 @@ import com.tripnest.backend.entity.User;
 import com.tripnest.backend.repository.NotificationRepository;
 import com.tripnest.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final EmailService emailService;
 
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext()
@@ -28,7 +31,22 @@ public class NotificationService {
                         new RuntimeException("User not found"));
     }
 
-    // Apni saari notifications
+    public void createNotification(
+            User user,
+            String message,
+            Notification.NotificationType type) {
+
+        Notification notification = Notification.builder()
+                .message(message)
+                .notificationType(type)
+                .isRead(false)
+                .user(user)
+                .build();
+
+        notificationRepository.save(notification);
+        log.info("Notification → {}: {}", user.getEmail(), message);
+    }
+
     public List<NotificationResponse> getMyNotifications() {
         User user = getCurrentUser();
         return notificationRepository
@@ -38,7 +56,6 @@ public class NotificationService {
                 .collect(Collectors.toList());
     }
 
-    // Sirf unread notifications
     public List<NotificationResponse> getUnreadNotifications() {
         User user = getCurrentUser();
         return notificationRepository
@@ -49,22 +66,22 @@ public class NotificationService {
                 .collect(Collectors.toList());
     }
 
-    // Unread count
     public long getUnreadCount() {
         User user = getCurrentUser();
         return notificationRepository
                 .countByUserIdAndIsRead(user.getId(), false);
     }
 
-    // Ek notification read mark karo
-    public NotificationResponse markAsRead(Long notificationId) {
+    public NotificationResponse markAsRead(Long id) {
         Notification notification = notificationRepository
-                .findById(notificationId)
+                .findById(id)
                 .orElseThrow(() ->
-                        new RuntimeException("Notification not found"));
+                        new RuntimeException(
+                                "Notification not found"));
 
         User user = getCurrentUser();
-        if (!notification.getUser().getId().equals(user.getId())) {
+        if (!notification.getUser().getId()
+                .equals(user.getId())) {
             throw new RuntimeException("Access denied");
         }
 
@@ -73,46 +90,31 @@ public class NotificationService {
                 notificationRepository.save(notification));
     }
 
-    // Saari notifications read mark karo
     public void markAllAsRead() {
         User user = getCurrentUser();
         List<Notification> unread = notificationRepository
                 .findByUserIdAndIsReadOrderByCreatedAtDesc(
                         user.getId(), false);
-
         unread.forEach(n -> n.setIsRead(true));
         notificationRepository.saveAll(unread);
     }
 
-    // Notification delete karo
-    public void deleteNotification(Long notificationId) {
+    public void deleteNotification(Long id) {
         Notification notification = notificationRepository
-                .findById(notificationId)
+                .findById(id)
                 .orElseThrow(() ->
-                        new RuntimeException("Notification not found"));
+                        new RuntimeException(
+                                "Notification not found"));
 
         User user = getCurrentUser();
-        if (!notification.getUser().getId().equals(user.getId())) {
+        if (!notification.getUser().getId()
+                .equals(user.getId())) {
             throw new RuntimeException("Access denied");
         }
 
         notificationRepository.delete(notification);
     }
 
-    // Internal use — doosri services se call hongi
-    public void createNotification(User user,
-                                    String message,
-                                    Notification.NotificationType type) {
-        Notification notification = Notification.builder()
-                .message(message)
-                .notificationType(type)
-                .isRead(false)
-                .user(user)
-                .build();
-        notificationRepository.save(notification);
-    }
-
-    // Manual notification create karo
     public NotificationResponse createManualNotification(
             NotificationRequest request) {
         User user = getCurrentUser();
