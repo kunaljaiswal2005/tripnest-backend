@@ -1,5 +1,10 @@
 package com.tripnest.backend.service;
 
+import java.util.List;
+
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
 import com.tripnest.backend.dto.BudgetRequest;
 import com.tripnest.backend.dto.BudgetResponse;
 import com.tripnest.backend.entity.Budget;
@@ -11,11 +16,8 @@ import com.tripnest.backend.repository.BudgetRepository;
 import com.tripnest.backend.repository.ExpenseRepository;
 import com.tripnest.backend.repository.TripRepository;
 import com.tripnest.backend.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Service;
 
-import java.util.List;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -26,6 +28,11 @@ public class BudgetService {
     private final UserRepository userRepository;
     private final ExpenseRepository expenseRepository;
     private final NotificationService notificationService;
+    private final EmailService emailService;
+
+    // ============================================================
+    // HELPERS
+    // ============================================================
 
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext()
@@ -46,8 +53,13 @@ public class BudgetService {
         return trip;
     }
 
-    public BudgetResponse createOrUpdateBudget(Long tripId,
-                                                BudgetRequest request) {
+    // ============================================================
+    // CREATE OR UPDATE BUDGET
+    // ============================================================
+
+    public BudgetResponse createOrUpdateBudget(
+            Long tripId, BudgetRequest request) {
+
         Trip trip = verifyTripOwner(tripId);
         User user = getCurrentUser();
 
@@ -59,32 +71,45 @@ public class BudgetService {
         budget.setTotalAmount(request.getTotalAmount());
         budget.setCurrency(request.getCurrency() != null
                 ? request.getCurrency() : "INR");
-        budget.setTransportationBudget(request.getTransportationBudget());
+        budget.setTransportationBudget(
+                request.getTransportationBudget());
         budget.setHotelBudget(request.getHotelBudget());
         budget.setFoodBudget(request.getFoodBudget());
         budget.setShoppingBudget(request.getShoppingBudget());
-        budget.setEntertainmentBudget(request.getEntertainmentBudget());
+        budget.setEntertainmentBudget(
+                request.getEntertainmentBudget());
         budget.setMiscBudget(request.getMiscBudget());
         budget.setTrip(trip);
 
         Budget saved = budgetRepository.save(budget);
 
-        // ✅ Auto notification
+        String msg = isNew
+                ? "Budget set for \""
+                    + trip.getTitle()
+                    + "\": ₹" + request.getTotalAmount()
+                : "Budget updated for \""
+                    + trip.getTitle()
+                    + "\": ₹" + request.getTotalAmount();
+
+        // ✅ Notification with referenceId
         notificationService.createNotification(
                 user,
-                isNew
-                    ? "Budget set for \"" + trip.getTitle()
-                        + "\": ₹" + request.getTotalAmount()
-                    : "Budget updated for \"" + trip.getTitle()
-                        + "\": ₹" + request.getTotalAmount(),
-                Notification.NotificationType.BUDGET_ALERT
+                msg,
+                Notification.NotificationType.BUDGET_ALERT,
+                trip.getId(),
+                Notification.ReferenceType.TRIP
         );
 
         return BudgetResponse.fromEntity(saved);
     }
 
+    // ============================================================
+    // GET BUDGET
+    // ============================================================
+
     public BudgetResponse getBudgetByTrip(Long tripId) {
         verifyTripOwner(tripId);
+        User user = getCurrentUser();
 
         Budget budget = budgetRepository.findByTripId(tripId)
                 .orElseThrow(() ->
@@ -101,30 +126,47 @@ public class BudgetService {
                 .sum();
 
         res.setTotalSpent(totalSpent);
-        res.setRemainingBudget(budget.getTotalAmount() - totalSpent);
+        res.setRemainingBudget(
+                budget.getTotalAmount() - totalSpent);
 
         if (budget.getTotalAmount() > 0) {
-            double pct = (totalSpent / budget.getTotalAmount()) * 100;
+            double pct = (totalSpent
+                    / budget.getTotalAmount()) * 100;
             res.setSpentPercentage(
                     Math.round(pct * 100.0) / 100.0);
         } else {
             res.setSpentPercentage(0.0);
         }
 
-        // ✅ Budget 80% cross hone pe alert
-        User user = getCurrentUser();
+        // ✅ 80%+ budget alert
         if (res.getSpentPercentage() >= 80) {
             notificationService.createNotification(
                     user,
-                    "⚠️ Budget alert: " + res.getSpentPercentage()
+                    "⚠️ Budget alert: "
+                            + res.getSpentPercentage()
                             + "% spent for \""
-                            + budget.getTrip().getTitle() + "\"",
-                    Notification.NotificationType.BUDGET_ALERT
+                            + budget.getTrip().getTitle()
+                            + "\"",
+                    Notification.NotificationType.BUDGET_ALERT,
+                    budget.getTrip().getId(),
+                    Notification.ReferenceType.TRIP
+            );
+
+            // Email bhi bhejo
+            emailService.sendBudgetAlertEmail(
+                    user.getEmail(),
+                    user.getName(),
+                    budget.getTrip().getTitle(),
+                    res.getSpentPercentage()
             );
         }
 
         return res;
     }
+
+    // ============================================================
+    // GET SUMMARY
+    // ============================================================
 
     public BudgetResponse getBudgetSummary(Long tripId) {
         verifyTripOwner(tripId);
@@ -144,10 +186,12 @@ public class BudgetService {
                 .sum();
 
         res.setTotalSpent(totalSpent);
-        res.setRemainingBudget(budget.getTotalAmount() - totalSpent);
+        res.setRemainingBudget(
+                budget.getTotalAmount() - totalSpent);
 
         if (budget.getTotalAmount() > 0) {
-            double pct = (totalSpent / budget.getTotalAmount()) * 100;
+            double pct = (totalSpent
+                    / budget.getTotalAmount()) * 100;
             res.setSpentPercentage(
                     Math.round(pct * 100.0) / 100.0);
         }
@@ -155,11 +199,16 @@ public class BudgetService {
         return res;
     }
 
+    // ============================================================
+    // DELETE
+    // ============================================================
+
     public void deleteBudget(Long tripId) {
         verifyTripOwner(tripId);
         Budget budget = budgetRepository.findByTripId(tripId)
                 .orElseThrow(() ->
-                        new RuntimeException("Budget not found"));
+                        new RuntimeException(
+                                "Budget not found"));
         budgetRepository.delete(budget);
     }
 }

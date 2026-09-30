@@ -1,5 +1,11 @@
 package com.tripnest.backend.service;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
 import com.tripnest.backend.dto.TripRequest;
 import com.tripnest.backend.dto.TripResponse;
 import com.tripnest.backend.entity.Notification;
@@ -7,12 +13,8 @@ import com.tripnest.backend.entity.Trip;
 import com.tripnest.backend.entity.User;
 import com.tripnest.backend.repository.TripRepository;
 import com.tripnest.backend.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -22,12 +24,21 @@ public class TripService {
     private final UserRepository userRepository;
     private final NotificationService notificationService;
 
+    // ============================================================
+    // HELPERS
+    // ============================================================
+
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext()
                 .getAuthentication().getName();
         return userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() ->
+                        new RuntimeException("User not found"));
     }
+
+    // ============================================================
+    // CREATE
+    // ============================================================
 
     public TripResponse createTrip(TripRequest request) {
         User user = getCurrentUser();
@@ -40,23 +51,31 @@ public class TripService {
                 .totalBudget(request.getTotalBudget())
                 .description(request.getDescription())
                 .coverImage(request.getCoverImage())
-                .status(request.getStatus() != null ?
-                        request.getStatus() : Trip.TripStatus.PLANNING)
+                .status(request.getStatus() != null
+                        ? request.getStatus()
+                        : Trip.TripStatus.PLANNING)
                 .user(user)
                 .build();
 
         Trip saved = tripRepository.save(trip);
 
-        // ✅ Auto notification
+        // ✅ Notification with referenceId
         notificationService.createNotification(
                 user,
-                "New trip created: " + saved.getTitle()
-                        + " → " + saved.getDestination(),
-                Notification.NotificationType.TRIP_REMINDER
+                "New trip created: \""
+                        + saved.getTitle()
+                        + "\" → " + saved.getDestination(),
+                Notification.NotificationType.TRIP_REMINDER,
+                saved.getId(),
+                Notification.ReferenceType.TRIP
         );
 
         return TripResponse.fromEntity(saved);
     }
+
+    // ============================================================
+    // GET ALL
+    // ============================================================
 
     public List<TripResponse> getMyTrips() {
         User user = getCurrentUser();
@@ -66,9 +85,14 @@ public class TripService {
                 .collect(Collectors.toList());
     }
 
+    // ============================================================
+    // GET BY ID
+    // ============================================================
+
     public TripResponse getTripById(Long id) {
         Trip trip = tripRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Trip not found"));
+                .orElseThrow(() ->
+                        new RuntimeException("Trip not found"));
         User user = getCurrentUser();
         if (!trip.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Access denied");
@@ -76,9 +100,15 @@ public class TripService {
         return TripResponse.fromEntity(trip);
     }
 
-    public TripResponse updateTrip(Long id, TripRequest request) {
+    // ============================================================
+    // UPDATE
+    // ============================================================
+
+    public TripResponse updateTrip(Long id,
+                                    TripRequest request) {
         Trip trip = tripRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Trip not found"));
+                .orElseThrow(() ->
+                        new RuntimeException("Trip not found"));
         User user = getCurrentUser();
         if (!trip.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Access denied");
@@ -95,12 +125,28 @@ public class TripService {
             trip.setStatus(request.getStatus());
         }
 
-        return TripResponse.fromEntity(tripRepository.save(trip));
+        Trip saved = tripRepository.save(trip);
+
+        // ✅ Notification
+        notificationService.createNotification(
+                user,
+                "Trip updated: \"" + saved.getTitle() + "\"",
+                Notification.NotificationType.TRAVEL_UPDATE,
+                saved.getId(),
+                Notification.ReferenceType.TRIP
+        );
+
+        return TripResponse.fromEntity(saved);
     }
+
+    // ============================================================
+    // DELETE
+    // ============================================================
 
     public void deleteTrip(Long id) {
         Trip trip = tripRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Trip not found"));
+                .orElseThrow(() ->
+                        new RuntimeException("Trip not found"));
         User user = getCurrentUser();
         if (!trip.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Access denied");
@@ -108,25 +154,34 @@ public class TripService {
         tripRepository.delete(trip);
     }
 
+    // ============================================================
+    // STATUS UPDATE
+    // ============================================================
+
     public TripResponse updateTripStatus(Long id,
                                           Trip.TripStatus status) {
         Trip trip = tripRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Trip not found"));
+                .orElseThrow(() ->
+                        new RuntimeException("Trip not found"));
         User user = getCurrentUser();
         if (!trip.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Access denied");
         }
 
         trip.setStatus(status);
+        Trip saved = tripRepository.save(trip);
 
-        // ✅ Status change notification
+        // ✅ Notification
         notificationService.createNotification(
                 user,
-                "Trip status updated: " + trip.getTitle()
-                        + " is now " + status.name(),
-                Notification.NotificationType.TRAVEL_UPDATE
+                "Trip \"" + saved.getTitle()
+                        + "\" status changed to "
+                        + status.name(),
+                Notification.NotificationType.TRAVEL_UPDATE,
+                saved.getId(),
+                Notification.ReferenceType.TRIP
         );
 
-        return TripResponse.fromEntity(tripRepository.save(trip));
+        return TripResponse.fromEntity(saved);
     }
 }

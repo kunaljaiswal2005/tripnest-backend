@@ -1,5 +1,11 @@
 package com.tripnest.backend.service;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
 import com.tripnest.backend.dto.GroupMemberResponse;
 import com.tripnest.backend.dto.GroupRequest;
 import com.tripnest.backend.dto.GroupResponse;
@@ -12,12 +18,8 @@ import com.tripnest.backend.repository.GroupMemberRepository;
 import com.tripnest.backend.repository.GroupRepository;
 import com.tripnest.backend.repository.TripRepository;
 import com.tripnest.backend.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +32,10 @@ public class GroupService {
     private final NotificationService notificationService;
     private final EmailService emailService;
 
+    // ============================================================
+    // HELPERS
+    // ============================================================
+
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext()
                 .getAuthentication().getName();
@@ -37,6 +43,10 @@ public class GroupService {
                 .orElseThrow(() ->
                         new RuntimeException("User not found"));
     }
+
+    // ============================================================
+    // CREATE GROUP
+    // ============================================================
 
     public GroupResponse createGroup(GroupRequest request) {
         User user = getCurrentUser();
@@ -57,6 +67,7 @@ public class GroupService {
 
         Group group = groupRepository.save(builder.build());
 
+        // Creator ko ADMIN banao
         GroupMember adminMember = GroupMember.builder()
                 .group(group)
                 .user(user)
@@ -66,15 +77,23 @@ public class GroupService {
 
         groupMemberRepository.save(adminMember);
 
+        // ✅ Notification
         notificationService.createNotification(
                 user,
                 "Group created: \"" + group.getName() + "\"",
-                Notification.NotificationType.SYSTEM);
+                Notification.NotificationType.SYSTEM,
+                group.getId(),
+                Notification.ReferenceType.GROUP
+        );
 
         return GroupResponse.fromEntity(
                 groupRepository.findById(group.getId())
                         .orElseThrow());
     }
+
+    // ============================================================
+    // GET MY GROUPS
+    // ============================================================
 
     public List<GroupResponse> getMyGroups() {
         User user = getCurrentUser();
@@ -103,12 +122,20 @@ public class GroupService {
                 .collect(Collectors.toList());
     }
 
+    // ============================================================
+    // GET BY ID
+    // ============================================================
+
     public GroupResponse getGroupById(Long groupId) {
         Group group = groupRepository.findById(groupId)
                 .orElseThrow(() ->
                         new RuntimeException("Group not found"));
         return GroupResponse.fromEntity(group);
     }
+
+    // ============================================================
+    // INVITE MEMBER
+    // ============================================================
 
     public GroupMemberResponse inviteMember(Long groupId,
                                              String email) {
@@ -149,16 +176,18 @@ public class GroupService {
 
         GroupMember saved = groupMemberRepository.save(member);
 
-        // In-app notification
+        // ✅ In-app notification — invited user ko
         notificationService.createNotification(
                 invitedUser,
                 "You have been invited to join group: \""
                         + group.getName() + "\" by "
                         + currentUser.getName(),
-                Notification.NotificationType.GROUP_INVITATION
+                Notification.NotificationType.GROUP_INVITATION,
+                group.getId(),
+                Notification.ReferenceType.GROUP
         );
 
-        // Email
+        // ✅ Email
         emailService.sendGroupInvitationEmail(
                 invitedUser.getEmail(),
                 invitedUser.getName(),
@@ -168,6 +197,10 @@ public class GroupService {
 
         return GroupMemberResponse.fromEntity(saved);
     }
+
+    // ============================================================
+    // ACCEPT INVITE
+    // ============================================================
 
     public GroupMemberResponse acceptInvite(Long groupId) {
         User user = getCurrentUser();
@@ -181,18 +214,20 @@ public class GroupService {
         member.setStatus(GroupMember.InviteStatus.ACCEPTED);
         GroupMember saved = groupMemberRepository.save(member);
 
-        // Notify group owner
         User groupOwner = member.getGroup().getCreatedBy();
 
+        // ✅ Notify group owner
         notificationService.createNotification(
                 groupOwner,
-                user.getName() + " accepted your invitation "
-                        + "to join \""
+                user.getName()
+                        + " accepted your invitation to join \""
                         + member.getGroup().getName() + "\"",
-                Notification.NotificationType.GROUP_INVITATION
+                Notification.NotificationType.GROUP_INVITATION,
+                member.getGroup().getId(),
+                Notification.ReferenceType.GROUP
         );
 
-        // Email to owner
+        // ✅ Email to owner
         emailService.sendInvitationAcceptedEmail(
                 groupOwner.getEmail(),
                 groupOwner.getName(),
@@ -200,16 +235,22 @@ public class GroupService {
                 member.getGroup().getName()
         );
 
-        // Notification to self
+        // ✅ Self notification
         notificationService.createNotification(
                 user,
                 "You joined group: \""
                         + member.getGroup().getName() + "\"",
-                Notification.NotificationType.SYSTEM
+                Notification.NotificationType.SYSTEM,
+                member.getGroup().getId(),
+                Notification.ReferenceType.GROUP
         );
 
         return GroupMemberResponse.fromEntity(saved);
     }
+
+    // ============================================================
+    // DECLINE INVITE
+    // ============================================================
 
     public GroupMemberResponse declineInvite(Long groupId) {
         User user = getCurrentUser();
@@ -222,18 +263,24 @@ public class GroupService {
 
         member.setStatus(GroupMember.InviteStatus.DECLINED);
 
-        // Notify group owner
+        // ✅ Notify group owner
         notificationService.createNotification(
                 member.getGroup().getCreatedBy(),
-                user.getName() + " declined your invitation "
-                        + "to join \""
+                user.getName()
+                        + " declined your invitation to join \""
                         + member.getGroup().getName() + "\"",
-                Notification.NotificationType.GROUP_INVITATION
+                Notification.NotificationType.GROUP_INVITATION,
+                member.getGroup().getId(),
+                Notification.ReferenceType.GROUP
         );
 
         return GroupMemberResponse.fromEntity(
                 groupMemberRepository.save(member));
     }
+
+    // ============================================================
+    // REMOVE MEMBER
+    // ============================================================
 
     public void removeMember(Long groupId, Long memberId) {
         User currentUser = getCurrentUser();
@@ -255,16 +302,22 @@ public class GroupService {
                 .orElseThrow(() ->
                         new RuntimeException("Member not found"));
 
-        // Notify removed member
+        // ✅ Notify removed member
         notificationService.createNotification(
                 toRemove.getUser(),
                 "You have been removed from group: \""
                         + toRemove.getGroup().getName() + "\"",
-                Notification.NotificationType.SYSTEM
+                Notification.NotificationType.SYSTEM,
+                toRemove.getGroup().getId(),
+                Notification.ReferenceType.GROUP
         );
 
         groupMemberRepository.delete(toRemove);
     }
+
+    // ============================================================
+    // DELETE GROUP
+    // ============================================================
 
     public void deleteGroup(Long groupId) {
         User user = getCurrentUser();
@@ -272,13 +325,18 @@ public class GroupService {
                 .orElseThrow(() ->
                         new RuntimeException("Group not found"));
 
-        if (!group.getCreatedBy().getId().equals(user.getId())) {
+        if (!group.getCreatedBy().getId()
+                .equals(user.getId())) {
             throw new RuntimeException(
                     "Only creator can delete group");
         }
 
         groupRepository.delete(group);
     }
+
+    // ============================================================
+    // GET BY TRIP
+    // ============================================================
 
     public List<GroupResponse> getGroupsByTrip(Long tripId) {
         return groupRepository.findByTripId(tripId)

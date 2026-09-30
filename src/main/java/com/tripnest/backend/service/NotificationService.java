@@ -23,6 +23,10 @@ public class NotificationService {
     private final UserRepository userRepository;
     private final EmailService emailService;
 
+    // ============================================================
+    // HELPERS
+    // ============================================================
+
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext()
                 .getAuthentication().getName();
@@ -31,21 +35,43 @@ public class NotificationService {
                         new RuntimeException("User not found"));
     }
 
+    // ============================================================
+    // CREATE NOTIFICATION
+    // ============================================================
+
+    // ✅ Full method — referenceId + referenceType ke saath
     public void createNotification(
             User user,
             String message,
-            Notification.NotificationType type) {
+            Notification.NotificationType type,
+            Long referenceId,
+            Notification.ReferenceType referenceType) {
 
         Notification notification = Notification.builder()
                 .message(message)
                 .notificationType(type)
                 .isRead(false)
                 .user(user)
+                .referenceId(referenceId)
+                .referenceType(referenceType)
                 .build();
 
         notificationRepository.save(notification);
-        log.info("Notification → {}: {}", user.getEmail(), message);
+        log.info("Notification → {}: {}",
+                user.getEmail(), message);
     }
+
+    // ✅ Backward compatible — bina referenceId ke
+    public void createNotification(
+            User user,
+            String message,
+            Notification.NotificationType type) {
+        createNotification(user, message, type, null, null);
+    }
+
+    // ============================================================
+    // GET NOTIFICATIONS
+    // ============================================================
 
     public List<NotificationResponse> getMyNotifications() {
         User user = getCurrentUser();
@@ -71,6 +97,10 @@ public class NotificationService {
         return notificationRepository
                 .countByUserIdAndIsRead(user.getId(), false);
     }
+
+    // ============================================================
+    // MARK READ
+    // ============================================================
 
     public NotificationResponse markAsRead(Long id) {
         Notification notification = notificationRepository
@@ -99,6 +129,10 @@ public class NotificationService {
         notificationRepository.saveAll(unread);
     }
 
+    // ============================================================
+    // DELETE
+    // ============================================================
+
     public void deleteNotification(Long id) {
         Notification notification = notificationRepository
                 .findById(id)
@@ -114,6 +148,10 @@ public class NotificationService {
 
         notificationRepository.delete(notification);
     }
+
+    // ============================================================
+    // MANUAL CREATE
+    // ============================================================
 
     public NotificationResponse createManualNotification(
             NotificationRequest request) {

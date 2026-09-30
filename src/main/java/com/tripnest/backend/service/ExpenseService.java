@@ -1,5 +1,15 @@
 package com.tripnest.backend.service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.tripnest.backend.dto.ExpenseRequest;
 import com.tripnest.backend.dto.ExpenseResponse;
 import com.tripnest.backend.dto.ExpenseSummaryResponse;
@@ -7,6 +17,7 @@ import com.tripnest.backend.dto.SplitMemberRequest;
 import com.tripnest.backend.entity.Budget;
 import com.tripnest.backend.entity.Expense;
 import com.tripnest.backend.entity.ExpenseSplit;
+import com.tripnest.backend.entity.Notification;
 import com.tripnest.backend.entity.Trip;
 import com.tripnest.backend.entity.User;
 import com.tripnest.backend.repository.BudgetRepository;
@@ -14,16 +25,8 @@ import com.tripnest.backend.repository.ExpenseRepository;
 import com.tripnest.backend.repository.ExpenseSplitRepository;
 import com.tripnest.backend.repository.TripRepository;
 import com.tripnest.backend.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -34,6 +37,7 @@ public class ExpenseService {
     private final TripRepository tripRepository;
     private final UserRepository userRepository;
     private final BudgetRepository budgetRepository;
+    private final NotificationService notificationService;
 
     // ============================================================
     // HELPERS
@@ -64,7 +68,6 @@ public class ExpenseService {
 
     private void createSplits(Expense expense,
                                ExpenseRequest request) {
-
         List<SplitMemberRequest> members = request.getMembers();
         if (members == null || members.isEmpty()) return;
 
@@ -75,18 +78,14 @@ public class ExpenseService {
         if (request.getSplitType()
                 == Expense.SplitType.EQUAL) {
 
-            // Base amount — floor to 2 decimals
             double base = Math.floor(
                     (total / count) * 100) / 100;
             double totalAssigned = base * (count - 1);
-
-            // Last member ko remaining dena — rounding fix
             double lastShare = Math.round(
                     (total - totalAssigned) * 100.0) / 100.0;
 
             for (int i = 0; i < members.size(); i++) {
                 SplitMemberRequest m = members.get(i);
-
                 User member = userRepository
                         .findById(m.getUserId())
                         .orElseThrow(() ->
@@ -96,37 +95,31 @@ public class ExpenseService {
 
                 double share = (i == members.size() - 1)
                         ? lastShare : base;
-
-                // Agar ye member hi payer hai
                 double paid = member.getId().equals(
                         expense.getPaidBy().getId())
                         ? expense.getAmount() : 0.0;
 
-                ExpenseSplit split = ExpenseSplit.builder()
+                splits.add(ExpenseSplit.builder()
                         .expense(expense)
                         .user(member)
                         .shareAmount(share)
                         .paidAmount(paid)
                         .isSettled(false)
-                        .build();
-
-                splits.add(split);
+                        .build());
             }
 
         } else if (request.getSplitType()
                 == Expense.SplitType.CUSTOM) {
 
-            // Validate — custom amounts ka sum == total
             double customTotal = members.stream()
                     .mapToDouble(m -> m.getCustomAmount() != null
                             ? m.getCustomAmount() : 0)
                     .sum();
 
-            double diff = Math.abs(customTotal - total);
-            if (diff > 0.02) {
+            if (Math.abs(customTotal - total) > 0.02) {
                 throw new RuntimeException(
                     "Custom amounts sum (" + customTotal
-                    + ") does not match expense amount ("
+                    + ") does not match expense ("
                     + total + ")");
             }
 
@@ -147,15 +140,13 @@ public class ExpenseService {
                         expense.getPaidBy().getId())
                         ? expense.getAmount() : 0.0;
 
-                ExpenseSplit split = ExpenseSplit.builder()
+                splits.add(ExpenseSplit.builder()
                         .expense(expense)
                         .user(member)
                         .shareAmount(m.getCustomAmount())
                         .paidAmount(paid)
                         .isSettled(false)
-                        .build();
-
-                splits.add(split);
+                        .build());
             }
         }
 
@@ -187,25 +178,56 @@ public class ExpenseService {
 
         Expense saved = expenseRepository.save(expense);
 
-        // Shared expense — splits banao
+        // Shared expense
         if (Boolean.TRUE.equals(request.getIsShared())
                 && request.getSplitType() != null
                 && request.getMembers() != null
                 && !request.getMembers().isEmpty()) {
+
             createSplits(saved, request);
+
+            // ✅ Notify each split member
+            for (SplitMemberRequest m : request.getMembers()) {
+                userRepository.findById(m.getUserId())
+                        .ifPresent(member -> {
+                    if (!member.getId().equals(user.getId())) {
+
+                        double share = request.getSplitType()
+                                == Expense.SplitType.EQUAL
+                                ? Math.round((saved.getAmount()
+                                    / request.getMembers().size())
+                                    * 100.0) / 100.0
+                                : (m.getCustomAmount() != null
+                                    ? m.getCustomAmount() : 0);
+
+                        notificationService.createNotification(
+                                member,
+                                user.getName()
+                                    + " added shared expense: \""
+                                    + saved.getDescription()
+                                    + "\" — your share: ₹"
+                                    + share,
+                                Notification.NotificationType
+                                        .BUDGET_ALERT,
+                                saved.getTrip().getId(),
+                                Notification.ReferenceType.TRIP
+                        );
+                    }
+                });
+            }
         }
 
-        // Fresh load — splits ke saath
         return ExpenseResponse.fromEntity(
                 expenseRepository.findById(saved.getId())
                         .orElseThrow());
     }
 
     // ============================================================
-    // GET ALL EXPENSES BY TRIP
+    // GET ALL BY TRIP
     // ============================================================
 
-    public List<ExpenseResponse> getExpensesByTrip(Long tripId) {
+    public List<ExpenseResponse> getExpensesByTrip(
+            Long tripId) {
         verifyTripOwner(tripId);
         return expenseRepository.findByTripId(tripId)
                 .stream()
@@ -242,6 +264,7 @@ public class ExpenseService {
                         new RuntimeException("Expense not found"));
 
         verifyTripOwner(expense.getTrip().getId());
+        User user = getCurrentUser();
 
         expense.setDescription(request.getDescription());
         expense.setAmount(request.getAmount());
@@ -254,14 +277,35 @@ public class ExpenseService {
 
         expenseRepository.save(expense);
 
-        // Purane splits delete karo — naye banao
+        // Purane splits delete — naye banao
         expenseSplitRepository.deleteByExpenseId(expenseId);
 
         if (Boolean.TRUE.equals(request.getIsShared())
                 && request.getSplitType() != null
                 && request.getMembers() != null
                 && !request.getMembers().isEmpty()) {
+
             createSplits(expense, request);
+
+            // ✅ Notify members on update
+            for (SplitMemberRequest m : request.getMembers()) {
+                userRepository.findById(m.getUserId())
+                        .ifPresent(member -> {
+                    if (!member.getId().equals(user.getId())) {
+                        notificationService.createNotification(
+                                member,
+                                user.getName()
+                                    + " updated shared expense: \""
+                                    + expense.getDescription()
+                                    + "\"",
+                                Notification.NotificationType
+                                        .BUDGET_ALERT,
+                                expense.getTrip().getId(),
+                                Notification.ReferenceType.TRIP
+                        );
+                    }
+                });
+            }
         }
 
         return ExpenseResponse.fromEntity(
@@ -281,9 +325,7 @@ public class ExpenseService {
 
         verifyTripOwner(expense.getTrip().getId());
 
-        // Splits pehle delete karo
         expenseSplitRepository.deleteByExpenseId(expenseId);
-
         expenseRepository.delete(expense);
     }
 
@@ -291,7 +333,8 @@ public class ExpenseService {
     // EXPENSE SUMMARY
     // ============================================================
 
-    public ExpenseSummaryResponse getExpenseSummary(Long tripId) {
+    public ExpenseSummaryResponse getExpenseSummary(
+            Long tripId) {
         Trip trip = verifyTripOwner(tripId);
 
         List<Expense> expenses =
@@ -302,7 +345,6 @@ public class ExpenseService {
                         ? e.getAmount() : 0)
                 .sum();
 
-        // Category wise total
         Map<String, Double> breakdown = new LinkedHashMap<>();
         for (Expense.ExpenseCategory cat :
                 Expense.ExpenseCategory.values()) {
@@ -314,7 +356,6 @@ public class ExpenseService {
             breakdown.put(cat.name(), catTotal);
         }
 
-        // Category wise count
         Map<String, Long> count = new LinkedHashMap<>();
         for (Expense.ExpenseCategory cat :
                 Expense.ExpenseCategory.values()) {
@@ -324,7 +365,6 @@ public class ExpenseService {
             count.put(cat.name(), catCount);
         }
 
-        // Budget info
         double totalBudget = 0;
         double remaining = 0;
         double percentage = 0;
