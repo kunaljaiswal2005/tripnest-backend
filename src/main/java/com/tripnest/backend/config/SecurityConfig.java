@@ -65,9 +65,10 @@ public class SecurityConfig {
                 // OAuth
                 .requestMatchers("/login/oauth2/**").permitAll()
                 .requestMatchers("/oauth2/**").permitAll()
-
-                // Admin
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/analytics/admin").hasRole("ADMIN") 
+
+                
 
                 // Everything else requires authentication
                 .anyRequest().authenticated()
