@@ -1,16 +1,5 @@
 package com.tripnest.backend.service;
 
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.stream.Collectors;
-
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
-
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
 import com.tripnest.backend.dto.DocumentResponse;
@@ -18,12 +7,22 @@ import com.tripnest.backend.entity.Notification;
 import com.tripnest.backend.entity.Trip;
 import com.tripnest.backend.entity.TripDocument;
 import com.tripnest.backend.entity.User;
+import com.tripnest.backend.repository.GroupMemberRepository;
 import com.tripnest.backend.repository.TripDocumentRepository;
 import com.tripnest.backend.repository.TripRepository;
 import com.tripnest.backend.repository.UserRepository;
-
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -35,6 +34,7 @@ public class DocumentService {
     private final TripRepository tripRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
+    private final GroupMemberRepository groupMemberRepository;
 
     // ============================================================
     // CONSTANTS
@@ -45,12 +45,12 @@ public class DocumentService {
 
     private static final List<String> ALLOWED_TYPES =
             Arrays.asList(
-                    "image/jpeg", "image/jpg", "image/png",
-                    "image/gif", "image/webp",
+                    "image/jpeg", "image/jpg",
+                    "image/png", "image/gif", "image/webp",
                     "application/pdf",
                     "application/msword",
-                    "application/vnd.openxmlformats-officedocument"
-                            + ".wordprocessingml.document",
+                    "application/vnd.openxmlformats-"
+                    + "officedocument.wordprocessingml.document",
                     "text/plain"
             );
 
@@ -66,41 +66,43 @@ public class DocumentService {
                         new RuntimeException("User not found"));
     }
 
+    // ✅ Owner + Member access
     private Trip verifyTripAccess(Long tripId) {
-        tripRepository.findById(tripId)
+        User user = getCurrentUser();
+        Trip trip = tripRepository.findById(tripId)
                 .orElseThrow(() ->
                         new RuntimeException("Trip not found"));
-        return tripRepository.findById(tripId).get();
-    }
 
-    // ============================================================
-    // VALIDATE FILE
-    // ============================================================
+        boolean isOwner = trip.getUser().getId()
+                .equals(user.getId());
+        boolean isMember = groupMemberRepository
+                .isTripMember(tripId, user.getId());
+
+        if (!isOwner && !isMember) {
+            throw new RuntimeException("Access denied");
+        }
+        return trip;
+    }
 
     private void validateFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new RuntimeException("File is empty");
         }
-
         if (file.getSize() > MAX_FILE_SIZE) {
             throw new RuntimeException(
-                    "File size exceeds 10MB limit. "
-                    + "Current size: "
+                    "File too large. Max: 10MB. Current: "
                     + String.format("%.1f MB",
                             file.getSize() / 1048576.0));
         }
-
-        String contentType = file.getContentType();
-        if (contentType == null
-                || !ALLOWED_TYPES.contains(contentType)) {
+        String ct = file.getContentType();
+        if (ct == null || !ALLOWED_TYPES.contains(ct)) {
             throw new RuntimeException(
-                    "File type not allowed: " + contentType
-                    + ". Allowed: images, PDF, Word, text");
+                    "File type not allowed: " + ct);
         }
     }
 
     // ============================================================
-    // UPLOAD FILE
+    // UPLOAD — Owner + Member
     // ============================================================
 
     @SuppressWarnings("unchecked")
@@ -110,26 +112,22 @@ public class DocumentService {
             TripDocument.DocumentType documentType,
             String description) throws IOException {
 
-        // Validate
         validateFile(file);
 
-        Trip trip = verifyTripAccess(tripId);
+        Trip trip = verifyTripAccess(tripId); // ✅
         User user = getCurrentUser();
 
-        // Cloudinary folder structure
-        String folder = "tripnest/trip_" + tripId;
+        String folder  = "tripnest/trip_" + tripId;
         String publicId = folder + "/"
-                + UUID.randomUUID().toString();
+                + UUID.randomUUID();
 
-        // Upload to Cloudinary
         String contentType = file.getContentType();
         boolean isImage = contentType != null
                 && contentType.startsWith("image/");
 
         Map<String, Object> options = ObjectUtils.asMap(
                 "public_id",    publicId,
-                "resource_type",
-                        isImage ? "image" : "raw",
+                "resource_type", isImage ? "image" : "raw",
                 "folder",       folder
         );
 
@@ -137,19 +135,20 @@ public class DocumentService {
                 cloudinary.uploader().upload(
                         file.getBytes(), options);
 
-        String fileUrl = (String) uploadResult.get("secure_url");
+        String fileUrl = (String) uploadResult
+                .get("secure_url");
         String cloudinaryPublicId =
                 (String) uploadResult.get("public_id");
 
-        log.info("File uploaded to Cloudinary: {}",
+        log.info("Uploaded to Cloudinary: {}",
                 cloudinaryPublicId);
 
-        // Save metadata to DB
         TripDocument document = TripDocument.builder()
-                .fileName(cloudinaryPublicId
-                        .substring(cloudinaryPublicId
+                .fileName(cloudinaryPublicId.substring(
+                        cloudinaryPublicId
                                 .lastIndexOf('/') + 1))
-                .originalFileName(file.getOriginalFilename())
+                .originalFileName(
+                        file.getOriginalFilename())
                 .cloudinaryPublicId(cloudinaryPublicId)
                 .fileUrl(fileUrl)
                 .fileType(contentType)
@@ -162,30 +161,31 @@ public class DocumentService {
                 .uploadedBy(user)
                 .build();
 
-        TripDocument saved = documentRepository.save(document);
+        TripDocument saved =
+                documentRepository.save(document);
 
-        // Notification
-        notificationService.createNotification(
+        // ✅ Notify all trip members
+        notifyTripMembers(
+                tripId,
                 user,
-                "Document uploaded: \""
-                        + file.getOriginalFilename()
-                        + "\" for trip \""
-                        + trip.getTitle() + "\"",
-                Notification.NotificationType.SYSTEM,
-                trip.getId(),
-                Notification.ReferenceType.TRIP
+                user.getName()
+                + " uploaded: \""
+                + file.getOriginalFilename()
+                + "\" to trip \""
+                + trip.getTitle() + "\"",
+                tripId
         );
 
         return DocumentResponse.fromEntity(saved);
     }
 
     // ============================================================
-    // GET DOCUMENTS BY TRIP
+    // GET ALL DOCUMENTS — Owner + Member
     // ============================================================
 
     public List<DocumentResponse> getDocumentsByTrip(
             Long tripId) {
-        verifyTripAccess(tripId);
+        verifyTripAccess(tripId); // ✅
         return documentRepository.findByTripId(tripId)
                 .stream()
                 .map(DocumentResponse::fromEntity)
@@ -193,13 +193,13 @@ public class DocumentService {
     }
 
     // ============================================================
-    // GET BY TYPE
+    // GET BY TYPE — Owner + Member
     // ============================================================
 
     public List<DocumentResponse> getDocumentsByType(
             Long tripId,
             TripDocument.DocumentType type) {
-        verifyTripAccess(tripId);
+        verifyTripAccess(tripId); // ✅
         return documentRepository
                 .findByTripIdAndDocumentType(tripId, type)
                 .stream()
@@ -208,34 +208,51 @@ public class DocumentService {
     }
 
     // ============================================================
-    // GET PHOTOS ONLY
+    // GET PHOTOS — Owner + Member
     // ============================================================
 
     public List<DocumentResponse> getPhotosByTrip(
             Long tripId) {
         return getDocumentsByType(
-                tripId, TripDocument.DocumentType.PHOTO);
+                tripId,
+                TripDocument.DocumentType.PHOTO);
     }
 
     // ============================================================
-    // DELETE
+    // GET BY ID
+    // ============================================================
+
+    public DocumentResponse getDocumentById(Long id) {
+        TripDocument doc = documentRepository
+                .findById(id)
+                .orElseThrow(() ->
+                        new RuntimeException(
+                                "Document not found"));
+
+        // Access check
+        verifyTripAccess(doc.getTrip().getId());
+
+        return DocumentResponse.fromEntity(doc);
+    }
+
+    // ============================================================
+    // DELETE — Only uploader or trip owner
     // ============================================================
 
     @SuppressWarnings("unchecked")
     public void deleteDocument(Long documentId)
             throws IOException {
 
-        TripDocument document = documentRepository
+        TripDocument doc = documentRepository
                 .findById(documentId)
                 .orElseThrow(() ->
                         new RuntimeException(
                                 "Document not found"));
 
         User currentUser = getCurrentUser();
-        Trip trip = document.getTrip();
+        Trip trip        = doc.getTrip();
 
-        // Only uploader or trip owner can delete
-        boolean isUploader = document.getUploadedBy()
+        boolean isUploader = doc.getUploadedBy()
                 .getId().equals(currentUser.getId());
         boolean isTripOwner = trip.getUser()
                 .getId().equals(currentUser.getId());
@@ -245,34 +262,49 @@ public class DocumentService {
                     "Only uploader or trip owner can delete");
         }
 
-        // Delete from Cloudinary
-        boolean isImage = document.getFileType() != null
-                && document.getFileType().startsWith("image/");
+        boolean isImage = doc.getFileType() != null
+                && doc.getFileType().startsWith("image/");
 
         cloudinary.uploader().destroy(
-                document.getCloudinaryPublicId(),
+                doc.getCloudinaryPublicId(),
                 ObjectUtils.asMap(
                         "resource_type",
-                        isImage ? "image" : "raw")
-        );
+                        isImage ? "image" : "raw"));
 
-        log.info("File deleted from Cloudinary: {}",
-                document.getCloudinaryPublicId());
+        log.info("Deleted from Cloudinary: {}",
+                doc.getCloudinaryPublicId());
 
-        // Delete from DB
-        documentRepository.delete(document);
+        documentRepository.delete(doc);
     }
 
     // ============================================================
-    // GET SINGLE DOCUMENT
+    // HELPER — Notify trip members
     // ============================================================
 
-    public DocumentResponse getDocumentById(Long documentId) {
-        TripDocument document = documentRepository
-                .findById(documentId)
-                .orElseThrow(() ->
-                        new RuntimeException(
-                                "Document not found"));
-        return DocumentResponse.fromEntity(document);
+    private void notifyTripMembers(Long tripId,
+                                    User currentUser,
+                                    String message,
+                                    Long refId) {
+        try {
+            groupMemberRepository
+                    .findAcceptedMembersByTripId(tripId)
+                    .stream()
+                    .map(gm -> gm.getUser())
+                    .filter(u -> !u.getId()
+                            .equals(currentUser.getId()))
+                    .forEach(u ->
+                        notificationService
+                                .createNotification(
+                                u,
+                                message,
+                                Notification.NotificationType
+                                        .SYSTEM,
+                                refId,
+                                Notification.ReferenceType
+                                        .TRIP));
+        } catch (Exception e) {
+            log.warn("Notify members failed: {}",
+                    e.getMessage());
+        }
     }
 }

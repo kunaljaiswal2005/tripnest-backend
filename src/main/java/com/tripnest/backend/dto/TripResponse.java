@@ -18,11 +18,13 @@ public class TripResponse {
     private String description;
     private String coverImage;
     private Trip.TripStatus status;
-    private String ownerEmail;
+    private String ownerEmail;      // ✅
+    private String ownerName;       // ✅
     private LocalDateTime createdAt;
     private int totalDays;
+    private boolean isOwner;        // ✅ Current user owner hai?
+    private int memberCount;        // ✅
 
-    // Entity se Response banana
     public static TripResponse fromEntity(Trip trip) {
         TripResponse res = new TripResponse();
         res.setId(trip.getId());
@@ -36,11 +38,14 @@ public class TripResponse {
         res.setStatus(trip.getStatus());
         res.setCreatedAt(trip.getCreatedAt());
         res.setOwnerEmail(trip.getUser().getEmail());
+        res.setOwnerName(trip.getUser().getName());
 
-        // Total days calculate karo
-        if (trip.getStartDate() != null && trip.getEndDate() != null) {
-            res.setTotalDays((int) (trip.getStartDate()
-                    .until(trip.getEndDate()).getDays() + 1));
+        if (trip.getStartDate() != null
+                && trip.getEndDate() != null) {
+            res.setTotalDays(
+                    (int)(trip.getStartDate()
+                            .until(trip.getEndDate())
+                            .getDays() + 1));
         }
 
         return res;

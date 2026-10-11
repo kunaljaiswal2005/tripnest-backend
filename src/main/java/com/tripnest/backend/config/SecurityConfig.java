@@ -140,15 +140,16 @@ public class SecurityConfig {
 
 
     @Bean
-    public AuthenticationProvider authenticationProvider() {
+public AuthenticationProvider authenticationProvider() {
 
-        DaoAuthenticationProvider provider =
-            new DaoAuthenticationProvider(userDetailsService);
+    DaoAuthenticationProvider provider =
+        new DaoAuthenticationProvider();          // argument hata do
 
-        provider.setPasswordEncoder(passwordEncoder());
+    provider.setUserDetailsService(userDetailsService);
+    provider.setPasswordEncoder(passwordEncoder());
 
-        return provider;
-    }
+    return provider;
+}
 
 
     @Bean
