@@ -408,70 +408,61 @@ public class ExpenseService {
     // EXPENSE SUMMARY — Owner + Member
     // ============================================================
 
-    public ExpenseSummaryResponse getExpenseSummary(
-            Long tripId) {
-        Trip trip = verifyTripAccess(tripId); // ✅
+    public ExpenseSummaryResponse getExpenseSummary(Long tripId) {
+    Trip trip = verifyTripAccess(tripId);
 
-        List<Expense> expenses =
-                expenseRepository.findByTripId(tripId);
+    List<Expense> expenses = expenseRepository.findByTripId(tripId);
 
-        double totalSpent = expenses.stream()
-                .mapToDouble(e -> e.getAmount() != null
-                        ? e.getAmount() : 0)
+    double totalSpent = expenses.stream()
+            .mapToDouble(e -> e.getAmount() != null ? e.getAmount() : 0)
+            .sum();
+
+    Map<String, Double> breakdown = new LinkedHashMap<>();
+    for (Expense.ExpenseCategory cat : Expense.ExpenseCategory.values()) {
+        double catTotal = expenses.stream()
+                .filter(e -> e.getCategory() == cat)
+                .mapToDouble(e -> e.getAmount() != null ? e.getAmount() : 0)
                 .sum();
-
-        Map<String, Double> breakdown =
-                new LinkedHashMap<>();
-        for (Expense.ExpenseCategory cat :
-                Expense.ExpenseCategory.values()) {
-            double catTotal = expenses.stream()
-                    .filter(e -> e.getCategory() == cat)
-                    .mapToDouble(e -> e.getAmount() != null
-                            ? e.getAmount() : 0)
-                    .sum();
-            breakdown.put(cat.name(),
-                    Math.round(catTotal * 100.0) / 100.0);
-        }
-
-        Map<String, Long> count = new LinkedHashMap<>();
-        for (Expense.ExpenseCategory cat :
-                Expense.ExpenseCategory.values()) {
-            long catCount = expenses.stream()
-                    .filter(e -> e.getCategory() == cat)
-                    .count();
-            count.put(cat.name(), catCount);
-        }
-
-        double totalBudget = 0;
-        double remaining   = 0;
-        double percentage  = 0;
-
-        var budgetOpt =
-                budgetRepository.findByTripId(tripId);
-        if (budgetOpt.isPresent()) {
-            totalBudget = budgetOpt.get().getTotalAmount();
-            remaining   = totalBudget - totalSpent;
-            if (totalBudget > 0) {
-                percentage = Math.round(
-                        (totalSpent / totalBudget)
-                        * 10000.0) / 100.0;
-            }
-        }
-
-        ExpenseSummaryResponse summary =
-                new ExpenseSummaryResponse();
-        summary.setTripId(tripId);
-        summary.setTripTitle(trip.getTitle());
-        summary.setTotalSpent(
-                Math.round(totalSpent * 100.0) / 100.0);
-        summary.setTotalBudget(totalBudget);
-        summary.setRemainingBudget(remaining);
-        summary.setSpentPercentage(percentage);
-        summary.setCategoryBreakdown(breakdown);
-        summary.setCategoryCount(count);
-
-        return summary;
+        breakdown.put(cat.name(), Math.round(catTotal * 100.0) / 100.0);
     }
+
+    Map<String, Long> count = new LinkedHashMap<>();
+    for (Expense.ExpenseCategory cat : Expense.ExpenseCategory.values()) {
+        long catCount = expenses.stream()
+                .filter(e -> e.getCategory() == cat)
+                .count();
+        count.put(cat.name(), catCount);
+    }
+
+    double totalBudget = 0;
+    double remaining   = 0;
+    double percentage  = 0;
+
+    // ✅ FIX: Pehle Budget table check karo, phir Trip ka budget field
+    var budgetOpt = budgetRepository.findByTripId(tripId);
+    if (budgetOpt.isPresent()) {
+        totalBudget = budgetOpt.get().getTotalAmount();
+    } else if (trip.getTotalBudget() != null) {
+        totalBudget = trip.getTotalBudget(); // ← Trip entity se fallback
+    }
+
+    if (totalBudget > 0) {
+        remaining  = totalBudget - totalSpent;
+        percentage = Math.round((totalSpent / totalBudget) * 10000.0) / 100.0;
+    }
+
+    ExpenseSummaryResponse summary = new ExpenseSummaryResponse();
+    summary.setTripId(tripId);
+    summary.setTripTitle(trip.getTitle());
+    summary.setTotalSpent(Math.round(totalSpent * 100.0) / 100.0);
+    summary.setTotalBudget(totalBudget);
+    summary.setRemainingBudget(remaining);
+    summary.setSpentPercentage(percentage);
+    summary.setCategoryBreakdown(breakdown);
+    summary.setCategoryCount(count);
+
+    return summary;
+}
 
     // ============================================================
     // HELPER — Notify other trip members

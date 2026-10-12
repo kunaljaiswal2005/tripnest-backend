@@ -5,6 +5,7 @@ import com.tripnest.backend.dto.ItineraryResponse;
 import com.tripnest.backend.entity.Itinerary;
 import com.tripnest.backend.entity.Trip;
 import com.tripnest.backend.entity.User;
+import com.tripnest.backend.repository.GroupMemberRepository;
 import com.tripnest.backend.repository.ItineraryRepository;
 import com.tripnest.backend.repository.TripRepository;
 import com.tripnest.backend.repository.UserRepository;
@@ -22,6 +23,7 @@ public class ItineraryService {
     private final ItineraryRepository itineraryRepository;
     private final TripRepository tripRepository;
     private final UserRepository userRepository;
+    private final GroupMemberRepository groupMemberRepository; // ✅ Added
 
     private User getCurrentUser() {
         String email = SecurityContextHolder.getContext()
@@ -30,6 +32,7 @@ public class ItineraryService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
 
+    // ✅ Owner ONLY — create/delete/generate ke liye
     private Trip verifyTripOwner(Long tripId) {
         User user = getCurrentUser();
         Trip trip = tripRepository.findById(tripId)
@@ -40,12 +43,30 @@ public class ItineraryService {
         return trip;
     }
 
-    // Day/Itinerary banao
+    // ✅ Owner + Member — read/update ke liye
+    private Trip verifyTripAccess(Long tripId) {
+        User user = getCurrentUser();
+        Trip trip = tripRepository.findById(tripId)
+                .orElseThrow(() -> new RuntimeException("Trip not found"));
+
+        boolean isOwner = trip.getUser().getId().equals(user.getId());
+        boolean isMember = groupMemberRepository
+                .isTripMember(tripId, user.getId());
+
+        if (!isOwner && !isMember) {
+            throw new RuntimeException("Access denied");
+        }
+        return trip;
+    }
+
+    // ============================================================
+    // CREATE — Only owner
+    // ============================================================
+
     public ItineraryResponse createItinerary(Long tripId,
                                               ItineraryRequest request) {
-        Trip trip = verifyTripOwner(tripId);
+        Trip trip = verifyTripOwner(tripId); // ✅ Owner only
 
-        // Check karo same day already exist toh nahi
         boolean exists = itineraryRepository
                 .findByTripId(tripId)
                 .stream()
@@ -68,9 +89,13 @@ public class ItineraryService {
                 itineraryRepository.save(itinerary));
     }
 
-    // Trip ke saare days dekho
+    // ============================================================
+    // GET ALL — Owner + Member
+    // ============================================================
+
     public List<ItineraryResponse> getItinerariesByTrip(Long tripId) {
-        verifyTripOwner(tripId);
+        verifyTripAccess(tripId); // ✅ Member bhi dekh sakta hai
+
         return itineraryRepository.findByTripId(tripId)
                 .stream()
                 .sorted((a, b) -> a.getDayNumber()
@@ -79,22 +104,28 @@ public class ItineraryService {
                 .collect(Collectors.toList());
     }
 
-    // Ek itinerary detail
+    // ============================================================
+    // GET ONE — Owner + Member
+    // ============================================================
+
     public ItineraryResponse getItineraryById(Long id) {
         Itinerary itinerary = itineraryRepository.findById(id)
                 .orElseThrow(() ->
                         new RuntimeException("Itinerary not found"));
-        verifyTripOwner(itinerary.getTrip().getId());
+        verifyTripAccess(itinerary.getTrip().getId()); // ✅ Member bhi dekh sakta hai
         return ItineraryResponse.fromEntity(itinerary);
     }
 
-    // Itinerary update karo
+    // ============================================================
+    // UPDATE — Owner + Member
+    // ============================================================
+
     public ItineraryResponse updateItinerary(Long id,
                                               ItineraryRequest request) {
         Itinerary itinerary = itineraryRepository.findById(id)
                 .orElseThrow(() ->
                         new RuntimeException("Itinerary not found"));
-        verifyTripOwner(itinerary.getTrip().getId());
+        verifyTripAccess(itinerary.getTrip().getId()); // ✅ Member bhi update kar sakta hai
 
         itinerary.setDayNumber(request.getDayNumber());
         itinerary.setDate(request.getDate());
@@ -104,29 +135,33 @@ public class ItineraryService {
                 itineraryRepository.save(itinerary));
     }
 
-    // Itinerary delete karo
+    // ============================================================
+    // DELETE — Only owner
+    // ============================================================
+
     public void deleteItinerary(Long id) {
         Itinerary itinerary = itineraryRepository.findById(id)
                 .orElseThrow(() ->
                         new RuntimeException("Itinerary not found"));
-        verifyTripOwner(itinerary.getTrip().getId());
+        verifyTripOwner(itinerary.getTrip().getId()); // ✅ Owner only
         itineraryRepository.delete(itinerary);
     }
 
-    // Trip ke liye automatically saare days generate karo
+    // ============================================================
+    // GENERATE DAYS — Only owner
+    // ============================================================
+
     public List<ItineraryResponse> generateDays(Long tripId) {
-        Trip trip = verifyTripOwner(tripId);
+        Trip trip = verifyTripOwner(tripId); // ✅ Owner only
 
         if (trip.getStartDate() == null || trip.getEndDate() == null) {
             throw new RuntimeException(
                     "Trip start/end date set nahi hai!");
         }
 
-        // Pehle se bane days delete karo
         itineraryRepository.deleteAll(
                 itineraryRepository.findByTripId(tripId));
 
-        // Har din ke liye itinerary banao
         List<Itinerary> days = new java.util.ArrayList<>();
         java.time.LocalDate current = trip.getStartDate();
         int dayNum = 1;
@@ -135,7 +170,8 @@ public class ItineraryService {
             Itinerary day = Itinerary.builder()
                     .dayNumber(dayNum)
                     .date(current)
-                    .notes("Day " + dayNum + " - " + trip.getDestination())
+                    .notes("Day " + dayNum + " - "
+                            + trip.getDestination())
                     .trip(trip)
                     .build();
             days.add(day);
