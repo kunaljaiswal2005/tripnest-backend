@@ -6,6 +6,7 @@ import com.tripnest.backend.security.UserDetailsServiceImpl;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -42,35 +43,25 @@ public class SecurityConfig {
     private final UserDetailsServiceImpl userDetailsService;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
 
+    // application-prod.properties se aayega
+    @Value("${app.frontend.url:http://localhost:5173}")
+    private String frontendUrl;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 
         http
-            // Enable CORS
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-
-            // Disable CSRF for REST API
             .csrf(csrf -> csrf.disable())
 
             .authorizeHttpRequests(auth -> auth
-
-                // VERY IMPORTANT:
-                // Allow browser CORS preflight requests
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-
-                // Public APIs
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/destinations/**").permitAll()
-
-                // OAuth
                 .requestMatchers("/login/oauth2/**").permitAll()
                 .requestMatchers("/oauth2/**").permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                .requestMatchers("/api/analytics/admin").hasRole("ADMIN") 
-
-                
-
-                // Everything else requires authentication
+                .requestMatchers("/api/analytics/admin").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
 
@@ -92,77 +83,55 @@ public class SecurityConfig {
         return http.build();
     }
 
-
-    // ==============================
-    // CORS CONFIGURATION
-    // ==============================
-
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
 
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // React/Vite frontend
+        // ✅ Local + Production dono allow — env variable se aayega
         configuration.setAllowedOrigins(
-            List.of("http://localhost:5173")
-        );
-
-        // Allowed HTTP methods
-        configuration.setAllowedMethods(
             List.of(
-                "GET",
-                "POST",
-                "PUT",
-                "DELETE",
-                "PATCH",
-                "OPTIONS"
+                "http://localhost:5173",
+                frontendUrl               // Render env: app.frontend.url
             )
         );
 
-        // Authorization + Content-Type etc.
-        configuration.setAllowedHeaders(
-            List.of("*")
+        configuration.setAllowedMethods(
+            List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
         );
 
-        // Required when using credentials/authenticated requests
+        configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source =
             new UrlBasedCorsConfigurationSource();
 
-        source.registerCorsConfiguration(
-            "/**",
-            configuration
-        );
+        source.registerCorsConfiguration("/**", configuration);
 
         return source;
     }
 
-
     @Bean
-public AuthenticationProvider authenticationProvider() {
+    public AuthenticationProvider authenticationProvider() {
 
-    DaoAuthenticationProvider provider =
-        new DaoAuthenticationProvider();          // argument hata do
+        DaoAuthenticationProvider provider =
+            new DaoAuthenticationProvider();
 
-    provider.setUserDetailsService(userDetailsService);
-    provider.setPasswordEncoder(passwordEncoder());
+        provider.setUserDetailsService(userDetailsService);
+        provider.setPasswordEncoder(passwordEncoder());
 
-    return provider;
-}
-
+        return provider;
+    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
-
     @Bean
     public AuthenticationManager authenticationManager(
             AuthenticationConfiguration config
     ) throws Exception {
-
         return config.getAuthenticationManager();
     }
 }
